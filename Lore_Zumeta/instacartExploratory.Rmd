@@ -202,27 +202,27 @@ LIMIT 10
 ```
 * Question 5*
 ```{r}
-dbGetQuery(sc, "DESC products_tbl")
+dbGetQuery(sc, "DESC orders_tbl")
 #dist of number of products in each order
 txt5 <- "
-SELECT order_id,
-COUNT(product_id) AS n_products
-FROM order_products__prior_tbl
-GROUP BY order_id
-ORDER BY n_products
+SELECT order_number,
+COUNT(order_id) AS n_products
+FROM orders_tbl
+GROUP BY order_number
+ORDER BY n_products DESC
 "
 
 q5 <-
   dbGetQuery(sc, txt5)
 q5 %>%
   ggplot(
-    aes(reorder(product_name, n_orders, function(x) x), 
-        n_orders)) +
+    aes(reorder(order_number, n_products, function(x) x), 
+        n_products)) +
   geom_bar(stat="identity", fill='darkorange') +
   coord_flip() + 
   scale_y_continuous(label=scales::comma) +
-  xlab("product") +
-  ylab("Number of orders") +
+  xlab("order number") +
+  ylab("Number of products") +
   theme_minimal()
 ```
 
@@ -269,9 +269,11 @@ data <- list(productId = 24852)
 
 product_times_ordered_txt %>%
   whisker.render(data) %>%
-  cat
+  cat  #cat formateatzeko
 ```
 ```{r}
+data <- list(productId = 24852) # podemos hacer la misma query con distinto producto
+
 product_times_ordered_txt %>%
   whisker.render(data) %>%
   dbGetQuery(sc, .) %>%
@@ -283,7 +285,68 @@ product_times_ordered_txt %>%
 ## Questions
 
 * For given department, plot the most popular product (with templating department).
+* For given department, give a list of 10 most popular product (with templating department).
+```{r}
+products_popularity_txt <- "
+SELECT op.product_id
+,   n_orders
+,   p.product_name
+FROM (
+    SELECT product_id
+    ,   COUNT(1) AS n_orders
+    FROM order_products__prior_tbl
+    GROUP BY product_id
+    ORDER BY n_orders DESC
+    LIMIT 10) op
+LEFT JOIN (
+    SELECT product_id
+    ,   product_name
+    FROM products_tbl
+    WHERE department_id = {{depId}}) p
+ON op.product_id = p.product_id
+"
+
+data <- list(depId = 19)
+
+products_popularity_txt %>%
+  whisker.render(data) %>%
+  cat  #cat formateatzeko
+
+products_popularity_txt %>%
+  whisker.render(data) %>%
+  dbGetQuery(sc, .)
+```
+
 * For given day, rank department popularity.
+
+```{r}
+department_popularity_txt <- "
+SELECT op.order_id
+,   p.product_name
+FROM (
+    SELECT department_id
+    ,   COUNT(1) AS n_department
+    FROM products_tbl
+    GROUP BY order_id
+    ORDER BY n_department DESC
+    LIMIT 10) op
+LEFT JOIN (
+    SELECT order_id
+    FROM orders_tbl
+    WHERE order_dow = {{dayId}}) p
+ON op.order_id = p.order_id
+"
+
+data <- list(dayId = 0)
+
+department_popularity_txt %>%
+  whisker.render(data) %>%
+  cat  #cat formateatzeko
+
+department_popularity_txt %>%
+  whisker.render(data) %>%
+  dbGetQuery(sc, .)
+```
 
 ## More on orders (Window Functions)
 
@@ -316,4 +379,84 @@ FROM orders_tbl
 WHERE user_id <= 10 
 ")
 ```
+* Product that is usually orders in numerous baskets
+
+```{r}
+"
+SELECT product_id
+,   AVG(products_number) AS avg_products_number
+FROM (
+    SELECT order_id
+    ,   product_id
+    ,   COUNT(product_id)  OVER(partition by order_id) AS products_number
+    FROM order_products__train_tbl
+) pn
+GROUP BY product_id
+ORDER BY avg_products_number DESC
+LIMIT 100
+" %>%
+dbGetQuery(sc, .)
+```
+
+* Could modify the query and add product name?
+
+
+```{r}
+"
+SELECT apn.product_id
+, 
+apn.avg_products_number, p.product_name
+FROM(
+  SELECT pn.product_id
+,   AVG(products_number) AS avg_products_number
+FROM (
+    SELECT order_id
+    ,   product_id
+    ,   COUNT(product_id)  OVER(partition by order_id) AS products_number
+    FROM order_products__train_tbl
+) pn 
+GROUP BY product_id
+ORDER BY avg_products_number DESC
+LIMIT 100) apn
+LEFT JOIN (
+    SELECT product_id
+    ,   product_name
+    FROM products_tbl) p
+ON apn.product_id = p.product_id
+" %>%
+  dbGetQuery(sc, .)
+```
+
+* Product that is usually orders in small baskets.
+
+```{r}
+"
+SELECT apn.product_id
+, 
+apn.avg_products_number, p.product_name
+FROM(
+  SELECT pn.product_id
+,   AVG(products_number) AS avg_products_number
+FROM (
+    SELECT order_id
+    ,   product_id
+    ,   COUNT(product_id)  OVER(partition by order_id) AS products_number
+    FROM order_products__train_tbl
+) pn 
+GROUP BY product_id
+ORDER BY avg_products_number 
+LIMIT 100) apn
+LEFT JOIN (
+    SELECT product_id
+    ,   product_name
+    FROM products_tbl) p
+ON apn.product_id = p.product_id
+" %>%
+  dbGetQuery(sc, .)
+```
+
+
+* For 10 first users and all their orders find days since first order. (CHALLENGING)
+
+
 

@@ -12,16 +12,9 @@ readFootball()
 library(ggplot2)
 library(ggthemes)
 
-##print(dbListTables(con))
+print(dbListTables(sql_con))
 ```
 
-```
-select ~ SELECT
-filter ~ WHERE
-arrange ~ ORDER
-summarise ~ aggregators: sum, min, sd, etc.
-mutate ~ operators: +, *, log, etc.
-```
 ## Pipes
 
 ```{r}
@@ -34,8 +27,14 @@ players %>%
   colnames
 ```
 ```{r}
+# edo bestela: bi aukera
+sapply(players, class)
+
 players %>%
   sapply(class)
+
+class %>% 
+  sapply(players, .)
 ```
 
 
@@ -46,6 +45,15 @@ players %>%
 players %>%
   head %>%
   select(player_name, birthday)
+```
+
+```{r}
+dbGetQuery(sql_con, "
+SELECT player_name
+,   birthday
+FROM Player
+LIMIT 6
+")
 ```
 
 ## WHERE ~ filter
@@ -77,6 +85,15 @@ players %>%
 players %>%
   mutate(weight_kg = weight*0.45359237) %>%
   summarise(weight=mean(weight_kg), height=mean(height))
+
+```
+```{r}
+"
+SELECT AVG(weight*0.45359237) AS weight
+,      AVG(height)
+FROM Player
+" %>%
+dbGetQuery(sql_con, .)
 ```
 
 ## GROUP BY
@@ -85,13 +102,13 @@ players %>%
 players %>%
   mutate(year=as.numeric(substring(birthday, 1, 4))) %>%
   group_by(year) %>%
-  summarise(weight=mean(height)) %>%
-  ggplot(aes(year, weight)) +
+  summarise(height=mean(height)) %>%
+  ggplot(aes(year, height)) +
   geom_line(colour="darkorange") +
   theme_minimal()
 ```
 ```{r}
-players %>%
+players %>% # gran variación del número de la muestra por año
   mutate(year=as.numeric(substring(birthday, 1, 4))) %>%
   group_by(year) %>%
   summarise(nsample=n()) %>%
@@ -99,14 +116,114 @@ players %>%
   geom_line(colour="darkorange") +
   theme_minimal()
 ```
+```{r}
+"
+SELECT CAST(SUBSTR(birthday, 1, 4) AS INT) AS year
+,   COUNT(1) AS n
+FROM Player
+GROUP BY year 
+" %>%
+  dbGetQuery(sql_con, .) %>% # HIVE-n beharrezkoa CAST(SUBSTR(birthday, 1, 4) AS INT)
+  ggplot(aes(year, n)) +
+  geom_line(colour="darkorange") +
+  theme_minimal()
+```
+
 
 ```{r}
 players %>%
   mutate(year=as.numeric(substring(birthday, 1, 4))) %>%
   group_by(year) %>%
-  summarise(weight=mean(height), nsamples=n()) %>%
-  filter(nsamples >= 200) %>%
-  ggplot(aes(year, weight)) +
+  summarise(height=mean(height), nsamples=n()) %>%
+  filter(nsamples >= 200) %>% # solo tomo en consideracion número de muestras mayores de 200
+  ggplot(aes(year, height)) +
   geom_line(colour="darkorange") +
   theme_minimal()
+```
+
+```{r}
+"
+SELECT CAST(SUBSTR(birthday, 1, 4) AS INT) AS year
+,   AVG(height) AS height
+FROM Player
+GROUP BY year 
+HAVING COUNT(year) > 200
+
+" %>%
+  dbGetQuery(sql_con, .) %>% # HIVE-n beharrezkoa CAST(SUBSTR(birthday, 1, 4) AS INT)
+  ggplot(aes(year, height)) +
+  geom_line(colour="darkorange") +
+  theme_minimal()
+  
+```
+
+
+Exercise
+
+* Translate from SQL to dply or from dply to SQL
+```{r}
+dbGetQuery(sql_con, "
+SELECT *
+FROM Match
+LIMIT 6
+")
+
+games %>%
+  head(.)
+```
+
+```{r}
+dbGetQuery(sql_con, "
+SELECT country_id
+,   COUNT(1) AS n
+FROM Match
+GROUP BY country_id
+ORDER BY n DESC
+")
+
+games %>%
+  group_by(country_id) %>%
+  summarise(n=n()) %>%
+  arrange(desc(n))
+```
+```{r}
+countries
+
+dbGetQuery(sql_con, "SELECT *
+           FROM country")
+```
+
+
+```{r, eval = F}
+games %>%
+  left_join(countries, by=c("country_id" = "id")) %>%
+  select(name, home_team_api_id) %>%
+  group_by(name) %>%
+  summarise(teams = n_distinct(home_team_api_id)) %>%
+  arrange(desc(teams))
+
+dbGetQuery(sql_con, "SELECT ")
+```
+
+```{r}
+dbGetQuery(sql_con, "
+SELECT *
+FROM Player_Attributes
+LIMIT 6
+")
+
+```
+
+* From where do players with higest accuracy come from?
+
+* Add team name and translate to dplyr
+
+```{r}
+dbGetQuery(sql_con, "
+SELECT stage, home_team_api_id, home_team_goal
+FROM Match
+WHERE country_id = 1
+AND season = '2008/2009'
+ORDER BY stage
+")
 ```
