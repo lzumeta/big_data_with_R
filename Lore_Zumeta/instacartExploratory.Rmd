@@ -226,6 +226,39 @@ q5 %>%
   theme_minimal()
 ```
 
+
+```{r}
+dbGetQuery(sc, 
+"SELECT n_products
+,
+COUNT(order_id) AS n_orders
+FROM (
+      SELECT order_id
+      ,
+            COUNT(1) AS n_products
+      FROM order_products__prior_tbl
+      GROUP BY order_id) op
+GROUP BY n_products
+") %>%
+  filter(n_products <= 50) %>%
+  ggplot(aes(n_products, n_orders)) +
+  geom_col(fill="darkorange") + 
+  theme_minimal()
+```
+```{r}
+order_products__prior %>%
+  group_by(order_id) %>%
+  summarise(n_products = n()) %>%
+  group_by(n_products) %>%
+  summarise(n_orders = n()) %>%
+  filter(n_products <= 50) %>%
+  collect %>%
+  ggplot(aes(n_products, n_orders)) +
+  geom_col(fill="darkorange") + 
+  theme_minimal()
+```
+
+
 * Question 6*
 ```{r}
 txt6 <- " SELECT department_id, 
@@ -290,7 +323,7 @@ product_times_ordered_txt %>%
 products_popularity_txt <- "
 SELECT op.product_id
 ,   n_orders
-,   p.product_name
+,   product_name
 FROM (
     SELECT product_id
     ,   COUNT(1) AS n_orders
@@ -319,7 +352,7 @@ products_popularity_txt %>%
 
 * For given day, rank department popularity.
 
-```{r}
+```{r, eval = F}
 department_popularity_txt <- "
 SELECT op.order_id
 ,   p.product_name
@@ -458,5 +491,34 @@ ON apn.product_id = p.product_id
 
 * For 10 first users and all their orders find days since first order. (CHALLENGING)
 
-
+```{r}
+orders %>% # we are executing sparklyr
+  filter(user_id <= 10) %>%
+  select(user_id, order_number, days_since_prior_order) %>%
+  arrange(user_id, order_number) %>%
+  mutate(days_since_first_order = cumsum(days_since_prior_order)) %>%
+  mutate(days_since_first_order=ifelse(is.null(days_since_prior_order), 0, days_since_first_order))
+```
+Now using HIVE SQL (Google-n idatzi hive window functions, )
+```{r}
+"
+SELECT user_id
+,   days_since_prior_order
+,   
+    COALESCE(
+        SUM(days_since_prior_order) OVER
+        (PARTITION BY user_id ORDER BY order_number ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), 0) AS
+        days_since_first_order
+,
+    order_number
+FROM orders_tbl
+WHERE user_id <= 10
+ORDER BY user_id
+,   order_number
+" %>%
+  dbGetQuery(sc, .)
+```
+```{r}
+dbGetQuery(sc, "SELECT COUNT(distinct order_number) FROM orders_tbl")
+```
 

@@ -1,0 +1,80 @@
+---
+title: 'Final Project: Big Data with R'
+author: "Lore Zumeta Olaskoaga"
+date: "June 29, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Questions
+
+* Which is the ranking of the days when people order the numerous baskets?
+* Which are the products (with their names) that people order in the hours of the day that there are fewer orders?
+* Which are most often reordered products? Which products have the highest probability of being reordered?
+
+```{r}
+source("readDataToMemory.R")
+readInstacart()
+
+library(DBI)
+library(ggplot2)
+library(ggthemes)
+
+src_tbls(sc)
+```
+
+
+```{r}
+"
+SELECT apn.product_id
+, 
+apn.avg_products_number, p.order_dow, p.order_id
+FROM(
+  SELECT pn.order_id, pn.product_id,
+  ,     AVG(products_number) AS avg_products_number
+  FROM (
+      SELECT order_id
+      ,   product_id
+      ,   COUNT(product_id)  OVER(partition by order_id) AS products_number
+      FROM order_products__train_tbl
+      ) pn 
+  GROUP BY product_id
+  ORDER BY avg_products_number DESC
+  LIMIT 100) apn
+LEFT JOIN (
+  SELECT order_id
+  ,   order_dow
+  FROM orders_tbl) p
+ON apn.order_id = p.order_id
+" %>%
+  dbGetQuery(sc, .)
+```
+
+Using `sparklyr`,
+```{r}
+
+```
+
+```{r}
+" SELECT order_id, order_hour_of_day, 
+ COUNT(1) AS n_orders_hour
+FROM orders_tbl
+GROUP BY order_hour_of_day
+ORDER BY n_orders_hour 
+LIMIT 10
+" %>%
+  dbGetQuery(sc, .)
+```
+
+```{r}
+orders %>%
+  left_join(products, by=c("country_id" = "id")) %>%
+  select(name, home_team_api_id) %>%
+  group_by(name) %>%
+  summarise(teams = n_distinct(home_team_api_id)) %>%
+  arrange(desc(teams))
+```
+
