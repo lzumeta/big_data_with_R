@@ -1,20 +1,23 @@
 ---
 title: 'Final Project: Big Data with R'
 author: "Lore Zumeta Olaskoaga"
-date: "June 29, 2017"
+date: "June 30, 2017"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
 ```
 
 ## Questions
 
+* Which are the most repited first time bought products?
 * Which is the ranking of the days when people order the numerous baskets?
-* Which are the products (with their names) that people order in the hours of the day that there are fewer orders?
-* Which are most often reordered products? Which products have the highest probability of being reordered?
+* Which product is less frequently bought again, the most disappointing product.
 
+## The analysis
+
+First of all, let us load the needed tables and libraries,
 ```{r}
 source("readDataToMemory.R")
 readInstacart()
@@ -22,59 +25,217 @@ readInstacart()
 library(DBI)
 library(ggplot2)
 library(ggthemes)
+library(knitr)
 
 src_tbls(sc)
 ```
-
-
-```{r}
-"
-SELECT apn.product_id
-, 
-apn.avg_products_number, p.order_dow, p.order_id
-FROM(
-  SELECT pn.order_id, pn.product_id,
-  ,     AVG(products_number) AS avg_products_number
-  FROM (
-      SELECT order_id
-      ,   product_id
-      ,   COUNT(product_id)  OVER(partition by order_id) AS products_number
-      FROM order_products__train_tbl
-      ) pn 
-  GROUP BY product_id
-  ORDER BY avg_products_number DESC
-  LIMIT 100) apn
-LEFT JOIN (
-  SELECT order_id
-  ,   order_dow
-  FROM orders_tbl) p
-ON apn.order_id = p.order_id
-" %>%
-  dbGetQuery(sc, .)
-```
-
-Using `sparklyr`,
-```{r}
-
-```
-
-```{r}
-" SELECT order_id, order_hour_of_day, 
- COUNT(1) AS n_orders_hour
-FROM orders_tbl
-GROUP BY order_hour_of_day
-ORDER BY n_orders_hour 
-LIMIT 10
-" %>%
-  dbGetQuery(sc, .)
-```
+Afterwards, let's have a look when people order,
 
 ```{r}
 orders %>%
-  left_join(products, by=c("country_id" = "id")) %>%
-  select(name, home_team_api_id) %>%
-  group_by(name) %>%
-  summarise(teams = n_distinct(home_team_api_id)) %>%
-  arrange(desc(teams))
+  collect %>%
+  ggplot(aes(x=order_hour_of_day)) + 
+  geom_histogram(stat="count",fill="springgreen4") + 
+  xlab("Hour of the day") + 
+  ylab("Number of orders")
+```
+
+We  observe that most orders are between 8:00-18:00.
+
+Now we are going to try to answer the questions made. The first one, which is the most repited first time bought product?
+
+
+```{r}
+first_order <-
+    "
+    SELECT tp.product_id
+    ,   p.product_name
+    ,   tp.perc
+    ,   tp.n_orders
+    FROM (
+          SELECT t.product_id
+          ,  t.perc
+          ,  t.n_orders
+          FROM(
+              SELECT product_id
+              ,   COUNT(1) AS n_orders
+              ,   add_to_cart_order
+              ,   COUNT(1)/SUM(COUNT(1)) OVER(PARTITION BY product_id) AS perc
+              FROM order_products__prior_tbl
+              GROUP BY product_id, add_to_cart_order
+              ) t
+          WHERE (add_to_cart_order=1 AND n_orders>10)
+          ORDER BY t.perc DESC
+    ) tp
+    LEFT JOIN (
+        SELECT product_id
+        ,  product_name
+        FROM products_tbl
+    ) p
+    ON tp.product_id = p.product_id
+    LIMIT 10"
+
+q1 <- dbGetQuery(sc, first_order)
+
+kable(q1)
+```
+
+Or, using *Sparklyr*,
+
+```{r}
+first_order_p <- order_products__prior %>% 
+  group_by(product_id, add_to_cart_order) %>% 
+  summarize(count = n()) %>% mutate(perc=count/sum(count)) %>% 
+  filter(add_to_cart_order == 1, count>10) %>% 
+  arrange(desc(perc)) %>% 
+  left_join(products,by="product_id") %>% 
+  select(product_name, perc, count) %>% 
+  ungroup() %>% 
+  top_n(10, wt=perc)
+
+kable(first_order_p)
+```
+
+
+Therefore, these are the most frequently first ordered products:
+
+```{r}
+q1 %>%
+  ggplot(
+    aes(reorder(product_name, perc, function(x) x), perc)) +
+  geom_bar(stat="identity", fill='dodgerblue2') +
+  coord_flip(ylim=c(0.64,0.8)) + 
+  scale_y_continuous(label=scales::comma) +
+  xlab("First ordered product") +
+  ylab("Percentage of the first ordered products") +
+  theme_minimal()
+```
+
+
+Second one, which is the day of the week that people order numerous baskets?
+
+```{r}
+day_num <-
+    "
+    SELECT order_dow
+    ,   AVG(pvg.n_products) AS avg_products
+    FROM (
+        SELECT order_dow
+        ,   p.order_id
+        ,   p.n_products
+        FROM (
+            SELECT order_id
+            ,   COUNT(product_id) AS n_products
+            FROM order_products__prior_tbl
+            GROUP BY order_id
+            ORDER BY n_products DESC
+        ) p
+        LEFT JOIN (
+            SELECT order_id
+            ,   order_dow
+            FROM orders_tbl
+        ) o
+        ON p.order_id = o.order_id
+        ) pvg
+    GROUP BY order_dow
+    ORDER BY avg_products DESC
+  "
+  
+q2 <- dbGetQuery(sc, day_num)
+
+kable(q2)
+```
+
+Let's plot it,
+
+```{r}
+q2 %>%
+  arrange(.) %>%
+  ggplot(aes(order_dow, avg_products)) + 
+  geom_line(color="blue", size=1) + geom_point(size=2, color="blue") + 
+  xlab("Day of the week") + 
+  ylab("Average product in each order")
+```
+Thus, it seems that people are more likely to order numerous products on sunday and for instance, on Tuesday they do not feel like doing big orders. Customers may take advantage of the weekend (they have more time) and they may think more about their needs so they order more products. 
+
+It will be interesting if the company would offer for packages of products on Tuesday or Wednesday.
+
+Third questiong: the more disappointing reordered products,
+
+```{r}
+disappointing <- order_products__prior %>% 
+  group_by(product_id, reordered == 1) %>% 
+  summarize(n_prod = n()) %>% 
+  arrange(n_prod) %>% 
+  left_join(products,by="product_id") %>% 
+  select(product_id, product_name, n_prod) %>% 
+  ungroup() %>% 
+  head(., 10)
+
+kable(disappointing)
+```
+
+
+```{r}
+disappointing2 <-
+    "
+        SELECT o.product_id
+        ,  p.product_name
+        , n_products
+        FROM (
+            SELECT product_id
+            , COUNT(1) AS n_products
+            , reordered
+            FROM order_products__prior_tbl
+            GROUP BY product_id, reordered
+            ORDER BY n_products
+        ) o
+        LEFT JOIN(
+            SELECT product_id
+            ,   product_name
+            FROM products_tbl) p
+        ON p.product_id = o.product_id
+        WHERE reordered = 1
+        LIMIT 10"
+
+q3 <- dbGetQuery(sc, disappointing2)
+
+kable(q3)
+```
+
+
+Finally, another interesting point would be when the customers order again. Which is the periodicity of each customer, which are the customer habbits, that is, whether they are used to buy at the same hours and day. 
+
+For instance if we plot an histogram of number of orders in the days since prior order,
+```{r}
+orders %>%
+  collect %>%
+  ggplot(aes(x=days_since_prior_order)) + 
+  geom_histogram(stat="count",fill="tomato")
+```
+
+we see that people seem to order more often after 1 week and one month.
+
+We have posed some other questions in class that I left without answering. These are some of them:
+
+* Which are most often reordered products? Which products have the highest probability of being reordered?
+* The customer that comes the highest number of times. (recomend product, replace products)
+* Peridoicity of products.
+* Product bought together.
+* Dependence of orders of buying of product with reordering it.
+* Segments of people that buy on the same period of time. 
+
+
+## What features we can add to the application
+* Recomend new product.
+* Suggest product that is very likely to be bought at the moment that person uses app.
+* Offers for packages of products.
+* When to buy in order to have faster shopping.
+* Recomend to not to buy a product.
+
+
+Finally we disconnect *Spark*,
+```{r}
+spark_disconnect(sc)
 ```
 

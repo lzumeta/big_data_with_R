@@ -330,13 +330,14 @@ FROM (
     FROM order_products__prior_tbl
     GROUP BY product_id
     ORDER BY n_orders DESC
-    LIMIT 10) op
-LEFT JOIN (
+    ) op
+INNER JOIN (
     SELECT product_id
     ,   product_name
     FROM products_tbl
     WHERE department_id = {{depId}}) p
 ON op.product_id = p.product_id
+LIMIT 10
 "
 
 data <- list(depId = 19)
@@ -352,22 +353,24 @@ products_popularity_txt %>%
 
 * For given day, rank department popularity.
 
-```{r, eval = F}
+```{r}
 department_popularity_txt <- "
-SELECT op.order_id
-,   p.product_name
+SELECT p.order_id
+,   op.product_name
 FROM (
     SELECT department_id
     ,   COUNT(1) AS n_department
     FROM products_tbl
     GROUP BY order_id
     ORDER BY n_department DESC
-    LIMIT 10) op
-LEFT JOIN (
+) op
+INNER JOIN (
+    LEFT JOIN (
     SELECT order_id
     FROM orders_tbl
     WHERE order_dow = {{dayId}}) p
-ON op.order_id = p.order_id
+ON op.product_id = p.product_id)
+LIMIT 10
 "
 
 data <- list(dayId = 0)
@@ -416,7 +419,7 @@ WHERE user_id <= 10
 
 ```{r}
 "
-SELECT product_id
+SELECT product_id 
 ,   AVG(products_number) AS avg_products_number
 FROM (
     SELECT order_id
@@ -430,7 +433,6 @@ LIMIT 100
 " %>%
 dbGetQuery(sc, .)
 ```
-
 * Could modify the query and add product name?
 
 
